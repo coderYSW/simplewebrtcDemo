@@ -1,0 +1,242 @@
+
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>SimpleWebRTC Demo</title>
+        <link rel="stylesheet" href="style.min.css">
+        <style>
+            .videoContainer {
+                position: relative;
+                width: 200px;
+                height: 150px;
+            }
+            .videoContainer video {
+                position: absolute;
+                width: 100%;
+                height: 100%;
+            }
+            .volume {
+                position: absolute;
+                left: 15%;
+                width: 70%;
+                bottom: 5px;
+                height: 5px;
+                display: none;
+            }
+            .connectionstate {
+                position: absolute;
+                top: 0px;
+                width: 100%;
+                text-align: center;
+                color: #fff
+            }
+            #localScreenContainer {
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
+        <h1 class="logo"><span>xiaobiaoza</span></h1>
+        <h3 id="title">Start a room</h3>
+        <form id="createRoom">
+            <input id="sessionInput"/>
+            <button disabled type="submit">Create it!</button>
+        </form>
+        <p id="subTitle"></p>
+        <hr>
+        <div class="videoContainer">
+            <video id="localVideo" style="height: 150px;" oncontextmenu="return false;"></video>
+            <meter id="localVolume" class="volume" min="-45" max="-20" high="-25" low="-40"></meter>
+        </div>
+        <div id="localScreenContainer" class="videoContainer">
+        </div>
+        <div id="remotes"></div>
+        <script src="jquery.min.js"></script>
+        <script src="last-v2.js"></script>
+        <script>
+            // 从浏览器地址获得房间room
+            var room = location.search && location.search.split('?')[1];
+
+            // 建立webrtc连接
+            var webrtc = new SimpleWebRTC({
+                // 本地video ：本地video标签id
+                localVideoEl: 'localVideo',
+                // 
+                remoteVideosEl: '',
+                // 立即访问摄像头
+                autoRequestMedia: true,
+                debug: false,
+                detectSpeakingEvents: true,
+                autoAdjustMic: false,
+                url:'http://192.168.8.144:8888',
+                peerConnectionConfig:{'url':'stun:203.183.172.196:3478'}
+            });
+
+            // webrtc准备好然后加入该房间
+            webrtc.on('readyToCall', function () {
+                
+                if (room) webrtc.joinRoom(room);
+            });
+
+            //显示音量
+            function showVolume(el, volume) {
+                if (!el) return;
+                if (volume < -45) volume = -45; 
+                if (volume > -20) volume = -20; 
+                el.value = volume;
+            }
+
+            // webrtc获得本地摄像头流后显示创建房间按钮,并显示本地视频音量
+            webrtc.on('localStream', function (stream) {
+                var button = document.querySelector('form>button');
+                if (button) button.removeAttribute('disabled');
+                $('#localVolume').show();
+            });
+            // webrtc获取不到本地摄像头支持
+            webrtc.on('localMediaError', function (err) {
+            	alert('Sorry,webrtc can not get user media or bowser is not support webrtc!');
+            });
+
+            // 根据屏幕大小设置video容器大小
+            webrtc.on('localScreenAdded', function (video) {
+                video.onclick = function () {
+                    video.style.width = video.videoWidth + 'px';
+                    video.style.height = video.videoHeight + 'px';
+                };
+                document.getElementById('localScreenContainer').appendChild(video);
+                $('#localScreenContainer').show();
+            });
+            // 本地视频结束
+            webrtc.on('localScreenRemoved', function (video) {
+                document.getElementById('localScreenContainer').removeChild(video);
+                $('#localScreenContainer').hide();
+            });
+
+            // 一个通过webrtcpeerconnection连接过来的video
+            webrtc.on('videoAdded', function (video, peer) {
+                console.log('video added', peer);
+                var remotes = document.getElementById('remotes');
+                if (remotes) {
+                    var container = document.createElement('div');
+                    container.className = 'videoContainer';
+                    container.id = 'container_' + webrtc.getDomId(peer);
+                    container.appendChild(video);
+
+                    // 禁止右击菜单事件
+                    video.oncontextmenu = function () { return false; };
+
+                    // 通过点击视屏调整视频div大小
+                    video.onclick = function () {
+                        container.style.width = video.videoWidth + 'px';
+                        container.style.height = video.videoHeight + 'px';
+                    };
+
+                    // 显示外接视屏音量
+                    var vol = document.createElement('meter');
+                    vol.id = 'volume_' + peer.id;
+                    vol.className = 'volume';
+                    vol.min = -45;
+                    vol.max = -20;
+                    vol.low = -40;
+                    vol.high = -25;
+                    container.appendChild(vol);
+
+                    // 显示iceservers连接状态
+                    if (peer && peer.pc) {
+                        var connstate = document.createElement('div');
+                        connstate.className = 'connectionstate';
+                        container.appendChild(connstate);
+                        peer.pc.on('iceConnectionStateChange', function (event) {
+                            switch (peer.pc.iceConnectionState) {
+                            case 'checking':
+                                connstate.innerText = 'Connecting to peer...';
+                                break;
+                            case 'connected':
+                            case 'completed': // on caller side
+                                $(vol).show();
+                                connstate.innerText = 'Connection established.';
+                                break;
+                            case 'disconnected':
+                                connstate.innerText = 'Disconnected.';
+                                break;
+                            case 'failed':
+                                connstate.innerText = 'Connection failed.';
+                                break;
+                            case 'closed':
+                                connstate.innerText = 'Connection closed.';
+                                break;
+                            }
+                        });
+                    }
+                    remotes.appendChild(container);
+                }
+            });
+            // 一个webrtcpeerconnection连接退出
+            webrtc.on('videoRemoved', function (video, peer) {
+                console.log('video removed ', peer);
+                var remotes = document.getElementById('remotes');
+                var el = document.getElementById(peer ? 'container_' + webrtc.getDomId(peer) : 'localScreenContainer');
+                if (remotes && el) {
+                    remotes.removeChild(el);
+                }
+            });
+
+            // 本地视屏音量变化
+            webrtc.on('volumeChange', function (volume, treshold) {
+                showVolume(document.getElementById('localVolume'), volume);
+            });
+            // 外接视屏音量变化
+            webrtc.on('remoteVolumeChange', function (peer, volume) {
+                showVolume(document.getElementById('volume_' + peer.id), volume);
+            });
+
+            // 本地iceservers获取失败
+            webrtc.on('iceFailed', function (peer) {
+                var connstate = document.querySelector('#container_' + webrtc.getDomId(peer) + ' .connectionstate');
+                console.log('local fail', connstate);
+                if (connstate) {
+                    connstate.innerText = 'Connection failed.';
+                    fileinput.disabled = 'disabled';
+                }
+            });
+
+            // 外部iceservers获取失败
+            webrtc.on('connectivityError', function (peer) {
+                var connstate = document.querySelector('#container_' + webrtc.getDomId(peer) + ' .connectionstate');
+                console.log('remote fail', connstate);
+                if (connstate) {
+                    connstate.innerText = 'Connection failed.';
+                    fileinput.disabled = 'disabled';
+                }
+            });
+
+            // 创建房间后取消创建房间操作并分享房间url
+            function setRoom(name) {
+                document.querySelector('form').remove();
+                document.getElementById('title').innerText = 'Room: ' + name;
+                document.getElementById('subTitle').innerText =  'Link to join: ' + location.href;
+                $('body').addClass('active');
+            }
+
+            if (room) {
+                setRoom(room);
+            } else {
+                $('form').submit(function () {
+                    var val = $('#sessionInput').val().toLowerCase().replace(/\s/g, '-').replace(/[^A-Za-z0-9_\-]/g, '');
+                    webrtc.createRoom(val, function (err, name) {
+                        console.log(' create room cb', arguments);
+
+                        var newUrl = location.pathname + '?' + name;
+                        if (!err) {
+                            history.replaceState({foo: 'bar'}, null, newUrl);
+                            setRoom(name);
+                        } else {
+                            console.log(err);
+                        }
+                    });
+                    return false;
+                });
+            }
+        </script>
+    </body>
+</html>
